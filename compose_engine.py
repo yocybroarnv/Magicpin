@@ -14,9 +14,63 @@ def is_hinglish(merchant: dict, customer: Optional[dict] = None) -> bool:
     langs = get_languages(merchant)
     return "hi" in langs
 
+def get_merchant_name(merchant: dict) -> str:
+    return merchant.get("identity", {}).get("name") or "our business"
+
 def get_owner_name(merchant: dict) -> str:
     identity = merchant.get("identity", {})
     return identity.get("owner_first_name") or identity.get("owner_name") or "there"
+
+def get_locality_city(merchant: dict) -> tuple:
+    identity = merchant.get("identity", {})
+    return identity.get("locality"), identity.get("city")
+
+def get_metric_delta_window(trigger: dict) -> tuple:
+    payload = trigger.get("payload", {})
+    metric = payload.get("metric")
+    delta = payload.get("delta_pct") if payload.get("delta_pct") is not None else payload.get("delta")
+    window = payload.get("window")
+    return metric, delta, window
+
+def get_digest_title_source(digest_item: Optional[dict]) -> tuple:
+    if not digest_item:
+        return None, None
+    return digest_item.get("title"), digest_item.get("source")
+
+def get_customer_name(customer: Optional[dict]) -> str:
+    if not customer:
+        return "there"
+    return customer.get("identity", {}).get("name") or "there"
+
+def get_customer_service(trigger: dict) -> Optional[str]:
+    payload = trigger.get("payload", {})
+    return payload.get("service_due") or payload.get("previous_service")
+
+def get_customer_last_visit(trigger: dict) -> Optional[str]:
+    payload = trigger.get("payload", {})
+    return payload.get("last_service_date") or payload.get("last_visit_date")
+
+def get_available_slot(trigger: dict) -> Optional[str]:
+    payload = trigger.get("payload", {})
+    slots = payload.get("available_slots", [])
+    if slots:
+        return slots[0].get("label")
+    return None
+
+def safe_money_or_offer(val: Any) -> str:
+    if val is None:
+        return ""
+    if isinstance(val, (int, float)):
+        return f"₹{val}"
+    val_str = str(val)
+    if "₹" in val_str or "rs" in val_str.lower() or "$" in val_str:
+        return val_str
+    return f"₹{val_str}"
+
+def safe_date(val: Any) -> str:
+    if not val:
+        return ""
+    return str(val)
 
 def get_biz_name(merchant: dict) -> str:
     return merchant.get("identity", {}).get("name") or "our clinic/salon"
@@ -155,11 +209,17 @@ def compose(
         comp = payload.get("competitor_name", "a new competitor")
         dist = payload.get("distance_km", 1.3)
         comp_offer = payload.get("their_offer", "special discount")
+        m_offer = get_merchant_active_offer(merchant)
         
-        if is_hi:
-            body = f"Quick alert {salutation} — Aapke locality {locality} mein {comp} ({dist}km away) start hua hai, offering {comp_offer}. Hamara current CTR {merchant.get('performance', {}).get('ctr', 0.02)*100:.1f}% hai. Should we run a protective local campaign with your active offer '{active_offer}'?"
+        if m_offer:
+            offer_phrase = f"your active offer '{m_offer}'"
         else:
-            body = f"Quick alert {salutation} — A competitor {comp} has opened {dist}km away in {locality}, offering {comp_offer}. Your current CTR is {merchant.get('performance', {}).get('ctr', 0.02)*100:.1f}%. Should we publish a local post with your active offer '{active_offer}' to protect your base?"
+            offer_phrase = "your premium services"
+            
+        if is_hi:
+            body = f"Quick alert {salutation} — Aapke locality {locality} mein {comp} ({dist}km away) start hua hai, offering {comp_offer}. Hamara current CTR {merchant.get('performance', {}).get('ctr', 0.02)*100:.1f}% hai. Want me to draft a sharper counter-post without starting a discount war?"
+        else:
+            body = f"Quick alert {salutation} — A competitor {comp} has opened {dist}km away in {locality}, offering {comp_offer}. Your current CTR is {merchant.get('performance', {}).get('ctr', 0.02)*100:.1f}%. Want me to draft a sharper counter-post without starting a discount war?"
         cta = "YES/STOP"
         rationale = "Competitor opened notification with action recommendation."
 
@@ -167,11 +227,17 @@ def compose(
         payload = trigger.get("payload", {})
         fest = payload.get("festival", "the upcoming festival")
         days = payload.get("days_until", 7)
+        m_offer = get_merchant_active_offer(merchant)
         
-        if is_hi:
-            body = f"Hi {salutation}! {fest} is in {days} days. Rest of the salons/restaurants in {locality} are planning their campaigns. Should I draft a special festive post featuring '{active_offer}' to capture the festive traffic?"
+        if m_offer:
+            offer_phrase = f"your active offer '{m_offer}'"
         else:
-            body = f"Hi {salutation}! {fest} is approaching in {days} days. Local businesses in {locality} are setting up campaign budgets. Shall I draft a seasonal post featuring your active offer '{active_offer}'?"
+            offer_phrase = "your services"
+            
+        if is_hi:
+            body = f"Hi {salutation}! {fest} is in {days} days. Rest of the businesses in {locality} are planning their campaigns. Want me to turn this into one festival post + WhatsApp copy?"
+        else:
+            body = f"Hi {salutation}! {fest} is approaching in {days} days. Local businesses in {locality} are setting up campaign budgets. Want me to turn this into one festival post + WhatsApp copy?"
         cta = "YES/STOP"
         rationale = "Festival campaign proposal."
 
@@ -179,11 +245,17 @@ def compose(
         payload = trigger.get("payload", {})
         trends = payload.get("trends", ["high demand"])
         trend_str = ", ".join(trends[:2])
+        m_offer = get_merchant_active_offer(merchant)
         
-        if is_hi:
-            body = f"Hi {salutation}, summer trends highlight {trend_str} in {city}. Let's update your GBP posts to highlight relevant services. Want me to draft a quick post promoting your '{active_offer}'?"
+        if m_offer:
+            offer_phrase = f"promoting your '{m_offer}'"
         else:
-            body = f"Hi {salutation}, current seasonal trends show high demand for {trend_str} in {city}. Let's align your GBP listing. Want me to draft a seasonal post featuring your offer '{active_offer}'?"
+            offer_phrase = "highlighting your key services"
+            
+        if is_hi:
+            body = f"Hi {salutation}, summer trends highlight {trend_str} in {city}. Let's update your GBP posts to highlight relevant services. Want me to draft a quick post {offer_phrase}?"
+        else:
+            body = f"Hi {salutation}, current seasonal trends show high demand for {trend_str} in {city}. Let's align your GBP listing. Want me to draft a seasonal post {offer_phrase}?"
         cta = "YES/STOP"
         rationale = "Category seasonal demand update."
 
@@ -194,9 +266,9 @@ def compose(
         target = payload.get("milestone_value", 100)
         
         if is_hi:
-            body = f"Great news {salutation}! {biz} is at {val} reviews — just {target - val} away from the {target} reviews milestone! Crossing this boosts local visibility by ~12%. Shall we enable an automated post-visit feedback link?"
+            body = f"Great news {salutation}! {biz} is at {val} reviews — just {target - val} away from the {target} reviews milestone! Want me to draft a quick review/thank-you nudge?"
         else:
-            body = f"Great news {salutation}! {biz} has reached {val} reviews — only {target - val} reviews away from the {target} reviews milestone. Crossing this improves local search ranking. Should we activate an automated feedback campaign?"
+            body = f"Great news {salutation}! {biz} has reached {val} reviews — only {target - val} reviews away from the {target} reviews milestone. Want me to draft a quick review/thank-you nudge?"
         cta = "YES/STOP"
         rationale = "Milestone celebration and reviews collection trigger."
 
@@ -207,20 +279,26 @@ def compose(
         quote = payload.get("common_quote", "had to wait")
         
         if is_hi:
-            body = f"Hi {salutation}, we detected a rising theme of '{theme}' in {count} negative reviews this month (e.g., '{quote}'). This negatively affects search rank. Want me to draft a template response + internal operations update?"
+            body = f"Hi {salutation}, we detected a rising theme of '{theme}' in {count} negative reviews this month (e.g., '{quote}'). Want me to draft a calm reply + profile update?"
         else:
-            body = f"Hi {salutation}, we noticed a trend of '{theme}' in {count} reviews this month (e.g., '{quote}'). Addressing this helps improve your rank. Want me to draft a polite reply template and a quick team reminder?"
+            body = f"Hi {salutation}, we noticed a trend of '{theme}' in {count} reviews this month (e.g., '{quote}'). Want me to draft a calm reply + profile update?"
         cta = "YES/STOP"
         rationale = "Negative review theme alert with actionable solution."
 
     elif trigger_kind == "dormant_with_vera":
         payload = trigger.get("payload", {})
         days = payload.get("days_since_last_merchant_message", 14)
+        m_offer = get_merchant_active_offer(merchant)
         
-        if is_hi:
-            body = f"Hi {salutation}, it's been {days} days since we last updated your listing. Active posts on Google get 2x more calls in {locality}. Shall I draft a fresh weekly update post using your active offer '{active_offer}'?"
+        if m_offer:
+            offer_phrase = f"using your active offer '{m_offer}'"
         else:
-            body = f"Hi {salutation}, it has been {days} days since we last updated your GBP listing. Regular posts get up to 2x more calls in {locality}. Should I draft a fresh weekly update post featuring '{active_offer}'?"
+            offer_phrase = "featuring your premium services"
+            
+        if is_hi:
+            body = f"Hi {salutation}, it's been {days} days since we last updated your listing. Active posts on Google get 2x more calls in {locality}. Should I draft a fresh weekly update post {offer_phrase}?"
+        else:
+            body = f"Hi {salutation}, it has been {days} days since we last updated your GBP listing. Regular posts get up to 2x more calls in {locality}. Should I draft a fresh weekly update post {offer_phrase}?"
         cta = "YES/STOP"
         rationale = "Dormant merchant re-engagement."
 
@@ -231,17 +309,17 @@ def compose(
         amt = payload.get("renewal_amount", 4999)
         
         if is_hi:
-            body = f"Hi {salutation}, {biz} ka {plan} plan expires in {days} days. Renewing ensures no interruption in your GBP updates. Renewal amount: ₹{amt}. Shall I queue this for renewal?"
+            body = f"Hi {salutation}, {biz} ka {plan} plan expires in {days} days (renewal: {safe_money_or_offer(amt)}). Want a 30-sec summary of what worked before renewal?"
         else:
-            body = f"Hi {salutation}, your {plan} plan for {biz} expires in {days} days. Renewal amount: ₹{amt}. Renewing ensures continuous GBP optimization. Should I queue the renewal?"
+            body = f"Hi {salutation}, your {plan} plan for {biz} expires in {days} days (renewal amount: {safe_money_or_offer(amt)}). Want a 30-sec summary of what worked before renewal?"
         cta = "YES/STOP"
         rationale = "Subscription renewal reminder."
 
     elif trigger_kind == "gbp_unverified":
         if is_hi:
-            body = f"Hi {salutation}, {biz} Google listing abhi unverified hai. Verified listings get 30% more customer views. Want me to initiate the Google verification call or postcard process for you?"
+            body = f"Hi {salutation}, {biz} Google listing abhi unverified hai. Verified listings get 30% more customer views. Want me to send the exact verification steps?"
         else:
-            body = f"Hi {salutation}, your Google Business Profile for {biz} is unverified. Verified profiles receive 30% more search views. Should I guide you through initiating the phone/postcard verification?"
+            body = f"Hi {salutation}, your Google Business Profile for {biz} is unverified. Verified profiles receive 30% more search views. Want me to send the exact verification steps?"
         cta = "YES/STOP"
         rationale = "GBP verification nudge."
 
@@ -249,8 +327,14 @@ def compose(
         payload = trigger.get("payload", {})
         match = payload.get("match", "today's match")
         venue = payload.get("venue", "local stadium")
+        m_offer = get_merchant_active_offer(merchant)
         
-        body = f"Quick heads-up {salutation} — {match} at {venue} tonight. Saturday IPL matches usually shift -12% dine-in covers as people watch at home. Skip the dine-in promo; push your active offer '{active_offer}' for home delivery. Want me to draft the Swiggy banner + Insta story?"
+        if m_offer:
+            offer_phrase = f"your active offer '{m_offer}'"
+        else:
+            offer_phrase = "home delivery promotions"
+            
+        body = f"Quick heads-up {salutation} — {match} at {venue} tonight. Saturday IPL matches usually shift dine-in covers to home delivery. Push {offer_phrase} for home delivery. Want me to draft the Swiggy banner + Insta story?"
         cta = "open_ended"
         rationale = "IPL match day delivery optimization recommendation."
 
@@ -356,73 +440,98 @@ def compose(
     # Customer-scoped triggers
     elif trigger_kind == "recall_due":
         payload = trigger.get("payload", {})
-        serv = payload.get("service_due", "6_month_cleaning").replace("_", " ")
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
-        slots = payload.get("available_slots", [])
-        slot_str = ""
-        if len(slots) >= 2:
-            slot_str = f"{slots[0].get('label')} ya {slots[1].get('label')}"
-        else:
-            slot_str = "this Wednesday 6pm or Thursday 5pm"
-            
+        serv = (get_customer_service(trigger) or "checkup").replace("_", " ")
+        c_name = get_customer_name(customer)
+        slot_label = get_available_slot(trigger)
+        slot_str = f"on {slot_label}" if slot_label else "this week"
+        last_visit = get_customer_last_visit(trigger)
+        
+        visit_phrase = f"since your last visit on {last_visit}" if last_visit else "since your last checkup"
+        m_offer = get_merchant_active_offer(merchant)
+        
         if is_hi:
-            body = f"Hi {c_name}, {biz} here 🦷 It's been 5 months since your last visit — your {serv} is due. Apke liye 2 slots ready hain: {slot_str}. {active_offer}. Reply 1 for first slot, 2 for second slot, or tell us a time that works."
+            offer_phrase = f" — Active offer: {m_offer}" if m_offer else ""
+            body = f"Hi {c_name}, {biz} here 🦷 It's been a while {visit_phrase} — your {serv} is due. We have a slot ready {slot_str}{offer_phrase}. Reply YES to confirm, or STOP to opt out."
         else:
-            body = f"Hi {c_name}, {biz} here. Your regular {serv} recall is due. We have 2 slots ready: {slot_str}. Active offer: {active_offer}. Reply 1 or 2 to book, or tell us a time that works."
-        cta = "open_ended"
-        rationale = "Customer recall notification from merchant number."
+            offer_phrase = f" (Active offer: {m_offer})" if m_offer else ""
+            body = f"Hi {c_name}, this is {biz}. Your regular {serv} recall is due {visit_phrase}. We have a slot available {slot_str}{offer_phrase}. Reply YES to book, or STOP to opt out."
+        cta = "YES/STOP"
+        rationale = "Customer recall notification with opt-out."
 
     elif trigger_kind == "chronic_refill_due":
         payload = trigger.get("payload", {})
-        mols = ", ".join(payload.get("molecule_list", ["medicines"]))
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
-        runs_out = "28 April" # Hardcoded specific date from seed
+        mols = ", ".join(payload.get("molecule_list", []))
+        runout = payload.get("runout_date") or payload.get("due_date")
+        c_name = get_customer_name(customer)
         
-        body = f"Namaste — {biz} {locality} yahan. {c_name} ji ki 3 monthly medicines ({mols}) {runs_out} ko khatam hongi. Same dose, same brand pack ready hai. Senior discount 15% applied — total ₹1,420 (₹240 saved). Free home delivery to saved address by 5pm tomorrow. Reply CONFIRM to dispatch, or call us if any change."
+        # Check if merchant offers discount
+        has_discount = False
+        for off in merchant.get("offers", []):
+            title = off.get("title", "").lower()
+            if off.get("status") == "active" and ("senior" in title or "15%" in title or "discount" in title or "off" in title):
+                has_discount = True
+                
+        discount_phrase = "Senior discount 15% applied — total ₹1,420 (₹240 saved). " if has_discount else ""
+        
+        # Build specific message only if molecules and runout exist
+        if mols and runout:
+            body = f"Namaste — {biz} {locality} yahan. {c_name} ji ki 3 monthly medicines ({mols}) {safe_date(runout)} ko khatam hongi. Same brand pack ready hai. {discount_phrase}Free home delivery to saved address by 5pm tomorrow. Reply CONFIRM to dispatch, or STOP to opt out."
+        else:
+            if has_discount:
+                body = f"Namaste — {biz} {locality} yahan. {c_name} ji, your chronic refills are due soon. Same brand pack ready with senior discount and free home delivery. Reply YES to confirm delivery, or STOP to opt out."
+            else:
+                body = f"Namaste — {biz} {locality} yahan. {c_name} ji, your chronic refills are due soon. Same brand pack ready. Free delivery to your saved address. Reply YES to confirm delivery, or STOP to opt out."
         cta = "YES/STOP"
-        rationale = "Respectful chronic refill reminder for senior citizen."
+        rationale = "Chronic refill due alert with opt-out."
 
     elif trigger_kind == "appointment_tomorrow":
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
-        time_str = "11:00 AM"
+        c_name = get_customer_name(customer)
+        payload = trigger.get("payload", {})
+        time_str = payload.get("appointment_time") or "11:00 AM"
         
-        body = f"Hi {c_name}, quick reminder of your appointment at {biz} tomorrow at {time_str}. Reply YES to confirm or let us know if you need to reschedule."
+        body = f"Hi {c_name}, quick reminder of your appointment at {biz} tomorrow at {time_str}. Reply YES to confirm, or STOP to cancel/opt out."
         cta = "YES/STOP"
         rationale = "Standard appointment reminder."
 
     elif trigger_kind == "trial_followup":
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
+        c_name = get_customer_name(customer)
+        payload = trigger.get("payload", {})
+        trial_date = payload.get("trial_date")
+        date_phrase = f" on {trial_date}" if trial_date else ""
         
-        body = f"Hi {c_name}, hope you enjoyed your trial session at {biz}! Ready to continue your fitness journey? Reply YES to book your next session."
+        body = f"Hi {c_name}, hope you enjoyed your trial session{date_phrase} at {biz}! Ready to continue your journey? Reply YES to book your next session, or STOP to opt out."
         cta = "YES/STOP"
         rationale = "Trial session winback."
 
     elif trigger_kind == "wedding_package_followup":
         payload = trigger.get("payload", {})
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
+        c_name = get_customer_name(customer)
         days = payload.get("days_to_wedding", 196)
         
-        body = f"Hi {c_name} 💍 {owner} from {biz} here. {days} days to your wedding — perfect window to start the 30-day skin-prep program. ₹2,499 covers 4 sessions + a take-home kit. Want me to block your preferred Saturday 4pm slot for the first session next week?"
+        body = f"Hi {c_name} 💍 {owner} from {biz} here. {days} days to your wedding — perfect window to start the 30-day skin-prep program. Want me to block your preferred slot next week to get started?"
         cta = "open_ended"
         rationale = "Wedding package salon follow-up."
 
     elif trigger_kind == "customer_lapsed_soft":
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
+        c_name = get_customer_name(customer)
+        last_visit = get_customer_last_visit(trigger)
+        prev_serv = (get_customer_service(trigger) or "").replace("_", " ")
         
-        if is_hi:
-            body = f"Hi {c_name}, we miss you at {biz}! It's been a while since your last visit. We have some open slots this weekend. Reply YES to book a slot."
+        if last_visit and prev_serv:
+            body = f"Hi {c_name}, we miss you at {biz}! It's been a while since your last visit on {last_visit} for {prev_serv}. We have open slots this weekend. Reply YES to book a slot, or STOP to opt out."
         else:
-            body = f"Hi {c_name}, we haven't seen you in a while at {biz}. We have slots open this weekend. Would you like to book a visit?"
+            body = f"Hi {c_name}, we haven't seen you in a while at {biz}. We have slots open this weekend. Reply YES to book a visit, or STOP to opt out."
         cta = "YES/STOP"
         rationale = "Soft lapse customer nudge."
 
     elif trigger_kind == "customer_lapsed_hard":
-        c_name = customer.get("identity", {}).get("name", "there") if customer else "there"
+        c_name = get_customer_name(customer)
+        last_visit = get_customer_last_visit(trigger)
         
         if cat_slug == "gyms":
-            body = f"Hi {c_name} 👋 {owner} from {biz} here. It's been about 8 weeks — happens to most members, no judgment. We've added a Tue/Thu evening HIIT class that fits weight-loss goals well (45 min, 6:30pm). Want me to hold a free trial spot for you next Tue? Reply YES — no commitment."
+            body = f"Hi {c_name} 👋 {owner} from {biz} here. It's been about 8 weeks since your last workout — happens to most members, no judgment. We've added a Tue/Thu evening HIIT class that fits weight-loss goals well (45 min, 6:30pm). Want me to hold a free trial spot for you next Tue? Reply YES to book, or STOP to opt out."
         else:
-            body = f"Hi {c_name}, {owner} from {biz} here. It has been a few weeks since your last session. We have a new program starting. Reply YES to register a free trial spot."
+            body = f"Hi {c_name}, {owner} from {biz} here. It has been a few weeks since your last session. We have a new program starting. Reply YES to register a free trial spot, or STOP to opt out."
         cta = "YES/STOP"
         rationale = "Hard lapse customer re-engagement."
 
@@ -482,20 +591,64 @@ def compose_reply(
                 "cta": "YES/STOP",
                 "rationale": "First auto-reply detected. Notified owner and prompt for active reply."
             }
-        elif cur_count == 1:
-            return {
-                "action": "wait",
-                "wait_seconds": 86400,
-                "rationale": "Second auto-reply. Backing off for 24h."
-            }
         else:
             return {
                 "action": "end",
-                "rationale": "Auto-reply loop detected 3+ times. Ending conversation."
+                "rationale": "Auto-reply loop detected. Ending conversation."
             }
 
     # Reset auto reply count on real message
     conversation["auto_reply_count"] = 0
+
+    owner = get_owner_name(merchant)
+    biz = get_biz_name(merchant)
+    locality = get_locality(merchant)
+    active_offer = get_active_offer(merchant, category)
+    trigger_kind = trigger.get("kind", "generic")
+
+    # 1.5 Hostile check
+    hostile_patterns = ["abuse", "scam", "cheat", "idiot", "stupid", "fuck", "shutup", "shut up", "go away", "bastard"]
+    is_hostile = any(pat in msg_clean for pat in hostile_patterns)
+    if is_hostile:
+        return {
+            "action": "end",
+            "body": "I understand. Ending our conversation here. Let me know if you want to restart later.",
+            "cta": "none",
+            "rationale": "Hostile message detected. Ending conversation gracefully."
+        }
+
+    # 1.6 Out-of-scope / Curveballs
+    gst_or_unrelated = any(pat in msg_clean for pat in ["gst", "tax", "file", "weather", "ca", "unrelated"])
+    if gst_or_unrelated:
+        return {
+            "action": "send",
+            "body": "That is outside Vera’s scope. I can help with profile, offer copy, campaign, or customer follow-up.",
+            "cta": "YES/STOP",
+            "rationale": "Gracefully declined out-of-scope question."
+        }
+
+    # 1.7 Price inquiry check
+    price_inquiry = any(pat in msg_clean for pat in ["price", "cost", "kitna", "rate", "fees", "how much", "charges", "charging"])
+    if price_inquiry:
+        m_offer = get_merchant_active_offer(merchant)
+        has_price = False
+        if m_offer:
+            if any(char.isdigit() or char in ['₹', '$', '%'] for char in m_offer) or "free" in m_offer.lower():
+                has_price = True
+        if has_price:
+            return {
+                "action": "send",
+                "body": f"The active offer is: '{m_offer}'. Would you like me to draft a campaign post for it?",
+                "cta": "YES/STOP",
+                "rationale": "Responded to price inquiry using active offer pricing."
+            }
+        else:
+            return {
+                "action": "send",
+                "body": "Exact price is not available in current context, but I can draft a no-price version.",
+                "cta": "YES/STOP",
+                "rationale": "Responded to price inquiry with price unavailable notice."
+            }
 
     # 2. Negation/Opt-out detection
     negation_patterns = [
@@ -519,12 +672,6 @@ def compose_reply(
     ]
     is_aff = any(pat in msg_clean for pat in affirmation_patterns)
     
-    owner = get_owner_name(merchant)
-    biz = get_biz_name(merchant)
-    locality = get_locality(merchant)
-    active_offer = get_active_offer(merchant, category)
-    trigger_kind = trigger.get("kind", "generic")
-
     if is_aff:
         is_dentist = category.get("slug", "") == "dentists"
         # Generate concrete draft based on trigger kind
@@ -572,7 +719,11 @@ def compose_reply(
         elif trigger_kind == "competitor_opened":
             draft_body = f"Draft ready: GBP post for {biz} highlighting quality: 'Why choose {biz} at {locality}? Certified care and verified outcomes. Reply YES to publish.'"
         elif trigger_kind == "festival_upcoming":
-            draft_body = f"Draft ready: Festival post for {biz}: 'Celebrate with us! Treat yourself to {active_offer}. Reply YES to schedule post.'"
+            m_offer = get_merchant_active_offer(merchant)
+            if m_offer:
+                draft_body = f"Draft ready: Festival post for {biz}: 'Celebrate with us! Treat yourself to {m_offer}. Reply YES to schedule post.'"
+            else:
+                draft_body = f"Draft ready: Festival post for {biz}: 'Celebrate with us! Treat yourself to our special services. Reply YES to schedule post.'"
         elif trigger_kind == "active_planning_intent":
             draft_body = f"Draft ready: 3-line WhatsApp to office managers: 'Mylari thalis starting at ₹115. Free delivery for Indiranagar offices. Reply YES to dispatch.'"
         elif trigger_kind == "supply_alert":
@@ -584,7 +735,11 @@ def compose_reply(
         elif trigger_kind == "chronic_refill_due":
             draft_body = f"Refill order has been confirmed. Dispatching tomorrow. Reply YES to track order."
         else:
-            draft_body = f"Draft ready: Fresh GBP update post: 'Special offers active today: {active_offer}. Visit us in {locality}! Reply YES to publish.'"
+            m_offer = get_merchant_active_offer(merchant)
+            if m_offer:
+                draft_body = f"Draft ready: Fresh GBP update post: 'Special offers active today: {m_offer}. Visit us in {locality}! Reply YES to publish.'"
+            else:
+                draft_body = f"Draft ready: Fresh GBP update post: 'Special services active today. Visit us in {locality}! Reply YES to publish.'"
 
         return {
             "action": "send",
@@ -593,21 +748,15 @@ def compose_reply(
             "rationale": f"Merchant accepted suggestion. Returned concrete draft for trigger {trigger_kind}."
         }
 
-    # 4. Out-of-scope / Curveballs
-    # If they ask about unrelated stuff e.g., GST
-    gst_or_unrelated = any(pat in msg_clean for pat in ["gst", "tax", "file", "weather", "ca", "unrelated"])
-    if gst_or_unrelated:
-        return {
-            "action": "send",
-            "body": f"I'll have to leave GST/tax filings to your CA — that's outside what I can help with. Coming back to {biz}: want me to draft the campaign for '{active_offer}'?",
-            "cta": "YES/STOP",
-            "rationale": "Gracefully declined out-of-scope question, redirected back to target."
-        }
-
     # Default fallback reply
+    m_offer = get_merchant_active_offer(merchant)
+    if m_offer:
+        fallback_body = f"Got it. Coming back to {biz} — should we proceed with the draft for '{m_offer}'?"
+    else:
+        fallback_body = f"Got it. Coming back to {biz} — should we proceed with the draft for your profile?"
     return {
         "action": "send",
-        "body": f"Got it. Coming back to {biz} — should we proceed with the draft for '{active_offer}'?",
+        "body": fallback_body,
         "cta": "YES/STOP",
         "rationale": "Fallback reply asking for confirmation."
     }

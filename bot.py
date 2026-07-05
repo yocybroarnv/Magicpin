@@ -109,12 +109,68 @@ def post_context(body: ContextPush):
         "stored_at": datetime.utcnow().isoformat() + "Z"
     }
 
+def score_action(merchant: dict, trigger: dict, customer: Optional[dict]) -> float:
+    kind = trigger.get("kind", "generic")
+    scope = trigger.get("scope", "merchant")
+    payload = trigger.get("payload", {})
+    
+    score = 0.0
+    
+    # 1. Scope and urgency prioritization
+    # customer safety/recall/refill/appointment: +30
+    if scope == "customer" or kind in ["recall_due", "chronic_refill_due", "appointment_tomorrow", "supply_alert"]:
+        score += 30.0
+    # perf_dip/revenue recovery: +25
+    elif kind in ["perf_dip", "seasonal_perf_dip", "winback_eligible"]:
+        score += 25.0
+    # competitor/festival/local event: +20
+    elif kind in ["competitor_opened", "festival_upcoming", "ipl_match_today", "category_seasonal"]:
+        score += 20.0
+    # review theme: +15
+    elif kind == "review_theme_emerged":
+        score += 15.0
+    # renewal/GBP verification: +10
+    elif kind in ["renewal_due", "gbp_unverified"]:
+        score += 10.0
+    # research digest/content ideas: +5
+    elif kind in ["research_digest", "cde_opportunity", "regulation_change"]:
+        score += 5.0
+    # dormant/curious fallback: 0
+    else:
+        score += 0.0
+        
+    # 2. Score features
+    # - trigger contains date/deadline: +15
+    if "deadline_iso" in payload or "date" in payload or "due_date" in payload or "expires_at" in trigger:
+        score += 15.0
+        
+    # - merchant has active offer: +15
+    offers = merchant.get("offers", [])
+    active_offers = [o for o in offers if o.get("status") == "active"]
+    if active_offers:
+        score += 15.0
+        
+    # - locality/city exists: +8
+    identity = merchant.get("identity", {})
+    if identity.get("locality") or identity.get("city"):
+        score += 8.0
+        
+    # - customer consent/status exists: +10
+    if customer:
+        score += 10.0
+        
+    # - trigger is generic with no payload facts: -10
+    if not payload or len(payload.keys()) <= 1:
+        score -= 10.0
+        
+    return score
+
 @app.post("/v1/tick")
 def tick(body: TickRequest):
-    actions = []
+    potential_actions = []
     
     for trg_id in body.available_triggers:
-        # Check if already suppressed
+        # Check if already suppressed in global store
         if trg_id in suppressed_triggers:
             continue
             
@@ -155,41 +211,90 @@ def tick(body: TickRequest):
             if not body_text:
                 continue
                 
-            conv_id = f"conv_{merchant_id}_{trg_id}"
+            suppression_key = composed.get("suppression_key") or trg_id
             
-            # Store conversation context
-            conversations[conv_id] = {
+            # If suppression key is already in suppressed_triggers, skip
+            if suppression_key in suppressed_triggers:
+                continue
+                
+            score = score_action(merchant, trigger, customer)
+            
+            potential_actions.append({
+                "score": score,
+                "trg_id": trg_id,
+                "trigger": trigger,
                 "merchant_id": merchant_id,
                 "customer_id": customer_id,
-                "trigger_id": trg_id,
-                "turns": [{"role": "vera", "message": body_text}],
-                "auto_reply_count": 0,
-                "proactive_action": composed
-            }
-            
-            # Suppress this trigger to avoid repeats
-            suppressed_triggers[trg_id] = True
-            
-            actions.append({
-                "conversation_id": conv_id,
-                "merchant_id": merchant_id,
-                "customer_id": customer_id,
-                "send_as": composed.get("send_as", "vera"),
-                "trigger_id": trg_id,
-                "template_name": f"vera_{trigger.get('kind', 'generic')}_v1",
-                "template_params": [
-                    merchant.get("identity", {}).get("name", "Merchant"),
-                    body_text[:50]
-                ],
-                "body": body_text,
-                "cta": composed.get("cta", "YES/STOP"),
-                "suppression_key": composed.get("suppression_key", trg_id),
-                "rationale": composed.get("rationale", "Composed proactive action.")
+                "merchant": merchant,
+                "category": category,
+                "customer": customer,
+                "composed": composed,
+                "body_text": body_text,
+                "suppression_key": suppression_key
             })
-        except Exception as e:
-            # Prevent crashing, return empty actions
+        except Exception:
             continue
             
+    # Sort potential actions by score descending
+    potential_actions.sort(key=lambda x: x["score"], reverse=True)
+    
+    actions = []
+    seen_suppression_keys = set()
+    
+    # Cap actions at 20
+    for item in potential_actions:
+        if len(actions) >= 20:
+            break
+            
+        supp_key = item["suppression_key"]
+        if (supp_key and supp_key in seen_suppression_keys) or (supp_key and supp_key in suppressed_triggers):
+            continue
+            
+        if supp_key:
+            seen_suppression_keys.add(supp_key)
+        
+        trg_id = item["trg_id"]
+        merchant_id = item["merchant_id"]
+        customer_id = item["customer_id"]
+        composed = item["composed"]
+        body_text = item["body_text"]
+        merchant = item["merchant"]
+        trigger = item["trigger"]
+        
+        conv_id = f"conv_{merchant_id}_{trg_id}"
+        
+        # Store conversation context
+        conversations[conv_id] = {
+            "merchant_id": merchant_id,
+            "customer_id": customer_id,
+            "trigger_id": trg_id,
+            "turns": [{"role": "vera", "message": body_text}],
+            "auto_reply_count": 0,
+            "proactive_action": composed
+        }
+        
+        # Suppress this trigger to avoid repeats
+        suppressed_triggers[trg_id] = True
+        if supp_key:
+            suppressed_triggers[supp_key] = True
+            
+        actions.append({
+            "conversation_id": conv_id,
+            "merchant_id": merchant_id,
+            "customer_id": customer_id,
+            "send_as": composed.get("send_as", "vera"),
+            "trigger_id": trg_id,
+            "template_name": f"vera_{trigger.get('kind', 'generic')}_v1",
+            "template_params": [
+                merchant.get("identity", {}).get("name", "Merchant"),
+                body_text[:50]
+            ],
+            "body": body_text,
+            "cta": composed.get("cta", "YES/STOP"),
+            "suppression_key": supp_key,
+            "rationale": composed.get("rationale", "Composed proactive action.")
+        })
+        
     return {"actions": actions}
 
 @app.post("/v1/reply")
