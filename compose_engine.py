@@ -41,6 +41,13 @@ def get_active_offer(merchant: dict, category: dict) -> str:
     
     return "special offers"
 
+def get_merchant_active_offer(merchant: dict) -> Optional[str]:
+    offers = merchant.get("offers", [])
+    active_offers = [o.get("title") for o in offers if o.get("status") == "active"]
+    if active_offers:
+        return active_offers[0]
+    return None
+
 def get_category_display_name(category: dict) -> str:
     return category.get("display_name") or category.get("slug", "business")
 
@@ -292,6 +299,60 @@ def compose(
         cta = "YES/STOP"
         rationale = "Subscription winback opportunity with metrics."
 
+    elif trigger_kind in ["perf_dip", "seasonal_perf_dip"]:
+        payload = trigger.get("payload", {})
+        metric = payload.get("metric", "calls")
+        delta = payload.get("delta_pct") if payload.get("delta_pct") is not None else payload.get("delta", -0.50)
+        window = payload.get("window", "7d")
+        
+        try:
+            if isinstance(delta, (int, float)):
+                if -1.0 <= delta <= 1.0:
+                    delta_str = f"{abs(int(delta * 100))}%"
+                else:
+                    delta_str = f"{abs(int(delta))}%"
+            else:
+                delta_str = str(delta).replace("-", "")
+        except Exception:
+            delta_str = "50%"
+            
+        perf = merchant.get("performance", {})
+        views = perf.get("views", 980)
+        calls = perf.get("calls", 4)
+        ctr = perf.get("ctr", 0.02)
+        ctr_str = f"{ctr * 100:.0f}%" if isinstance(ctr, (int, float)) else "2%"
+        
+        m_offer = get_merchant_active_offer(merchant)
+        if m_offer:
+            body = f"Hi {salutation}, {metric} are down {delta_str} in {window}. Your 30d snapshot: {views} views, {calls} calls, CTR {ctr_str}. Want me to draft one recovery post using {m_offer}?"
+        else:
+            body = f"Hi {salutation}, {metric} are down {delta_str} in {window}. Your 30d snapshot: {views} views, {calls} calls, CTR {ctr_str}. Want me to draft one recovery post to boost your profile?"
+        cta = "YES/STOP"
+        rationale = f"Performance dip alert for {metric} down {delta_str} in {window}."
+
+    elif trigger_kind == "perf_spike":
+        payload = trigger.get("payload", {})
+        metric = payload.get("metric", "views")
+        delta = payload.get("delta_pct") if payload.get("delta_pct") is not None else payload.get("delta", 0.35)
+        
+        try:
+            if isinstance(delta, (int, float)):
+                if -1.0 <= delta <= 1.0:
+                    delta_str = f"{int(delta * 100)}%"
+                else:
+                    delta_str = f"{int(delta)}%"
+            else:
+                delta_str = str(delta)
+        except Exception:
+            delta_str = "35%"
+            
+        if is_hi:
+            body = f"Great news {salutation}! Aapke {metric} {delta_str} up huye hain. We are busier than ever! Should we post a thank-you update to keep the momentum going?"
+        else:
+            body = f"Great news {salutation}! We noticed a {delta_str} spike in {metric} for {biz} in {city}. Should we publish a post to thank your customers and keep the momentum going?"
+        cta = "YES/STOP"
+        rationale = f"Performance spike alert for {metric} up {delta_str}."
+
     # Customer-scoped triggers
     elif trigger_kind == "recall_due":
         payload = trigger.get("payload", {})
@@ -493,9 +554,18 @@ def compose_reply(
                         delta_str = str(delta)
                 except Exception:
                     delta_str = str(delta)
-                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {active_offer}. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the {metric} dip ({delta_str} in {window}); do not add extra discount.'"
+                
+                m_offer = get_merchant_active_offer(merchant)
+                if m_offer:
+                    draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {m_offer}. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the {metric} dip ({delta_str} in {window}); do not add extra discount.'"
+                else:
+                    draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are open for bookings. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the {metric} dip ({delta_str} in {window}); do not add extra discount.'"
             else:
-                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {active_offer}. Limited slots today; reply YES and we’ll help you pick the right time.'"
+                m_offer = get_merchant_active_offer(merchant)
+                if m_offer:
+                    draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {m_offer}. Limited slots today; reply YES and we’ll help you pick the right time.'"
+                else:
+                    draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are open for bookings. Limited slots today; reply YES and we’ll help you pick the right time.'"
                 
         elif trigger_kind == "perf_spike":
             draft_body = f"Draft ready: Follow-up post for {biz}: 'We are busier than ever thanks to you! Block your slots for Saturday now to avoid waiting. Reply YES to book.'"

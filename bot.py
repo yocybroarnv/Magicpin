@@ -74,7 +74,7 @@ def metadata():
         "team_name": "Vera AI",
         "team_members": ["Arnav Raj"],
         "model": "Deterministic Rule Engine (No-LLM)",
-        "approach": "Context-grounded deterministic composer for magicpin merchant engagement triggers.",
+        "approach": "Context-grounded deterministic composer using category, merchant, trigger, and optional customer context.",
         "contact_email": "suvam.arnavraj@gmail.com",
         "version": "1.0.0",
         "submitted_at": datetime.utcnow().isoformat() + "Z"
