@@ -71,11 +71,11 @@ def healthz():
 @app.get("/v1/metadata")
 def metadata():
     return {
-        "team_name": "Team Antigravity",
-        "team_members": ["Antigravity"],
+        "team_name": "Vera AI",
+        "team_members": ["Arnav Raj"],
         "model": "Deterministic Rule Engine (No-LLM)",
-        "approach": "Fully rule-based & template-driven composition engine for 26 trigger families.",
-        "contact_email": "antigravity@google.com",
+        "approach": "Context-grounded deterministic composer for magicpin merchant engagement triggers.",
+        "contact_email": "suvam.arnavraj@gmail.com",
         "version": "1.0.0",
         "submitted_at": datetime.utcnow().isoformat() + "Z"
     }

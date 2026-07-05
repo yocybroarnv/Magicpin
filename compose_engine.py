@@ -104,7 +104,7 @@ def compose(
             patient_segment = digest_item.get("patient_segment", "patients")
             
             if is_dentist:
-                body = f"Dr. {owner}, JIDA's Oct issue landed. One item relevant to your high-risk adult patients — {trial_n}-patient trial showed 3-month fluoride recall cuts caries recurrence 38% better than 6-month. Worth a look (2-min abstract). Want me to pull it + draft a patient-ed WhatsApp you can share? — JIDA Oct 2026 p.14"
+                body = f"Dr. {owner}, JIDA's Oct issue landed. One item relevant to your high-risk adult patients — new clinical trial on 3-month fluoride recall. Worth a look. Keep your teeth healthy with timely checkups and preventive care. Want me to pull it + draft a patient-ed WhatsApp you can share? — JIDA Oct 2026 p.14"
                 cta = "open_ended"
                 rationale = "Clinical-peer tone digest message referencing a JIDA trial relevant to dentists."
             else:
@@ -112,7 +112,10 @@ def compose(
                 cta = "open_ended"
                 rationale = "Proactive digest share with open-ended commitment request."
         else:
-            body = f"Hi {salutation}, this week's research digest is ready. It covers recent trends in {get_category_display_name(category)}. Want me to share the top insights and drafts you can publish?"
+            if is_dentist:
+                body = f"Hi {salutation}, this week’s dental care update is ready for your clinic. I can turn it into one patient-friendly Google/WhatsApp post with no medical overclaims. Want me to draft it?"
+            else:
+                body = f"Hi {salutation}, this week’s {get_category_display_name(category).lower()} update is ready for {biz}. I can turn it into one customer-friendly Google/WhatsApp post with no overclaims. Want me to draft it?"
             cta = "open_ended"
             rationale = "Proactive generic digest alert."
 
@@ -462,18 +465,40 @@ def compose_reply(
     trigger_kind = trigger.get("kind", "generic")
 
     if is_aff:
+        is_dentist = category.get("slug", "") == "dentists"
         # Generate concrete draft based on trigger kind
         draft_body = ""
-        if trigger_kind == "research_digest":
-            draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'Keep your teeth healthy and cut cavities by 38% with a 3-month fluoride check. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the calls dip; do not add extra discount.'"
-        elif trigger_kind == "perf_dip":
-            draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {active_offer}. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the calls dip; do not add extra discount.'"
-        elif trigger_kind == "seasonal_perf_dip":
-            draft_body = f"Draft ready: Summer attendance challenge post for {biz}: 'Stay active this summer! Join our 30-day challenge and get {active_offer}. Reply YES to join!'"
+        
+        if trigger_kind in ["research_digest", "cde_opportunity", "regulation_change"]:
+            if is_dentist:
+                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: New dental care update worth sharing this week. Keep your teeth healthy with timely checkups and preventive care. Reply YES and we’ll help you pick the right slot."
+            else:
+                cat_display = category.get("display_name") or category.get("slug", "business")
+                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: New {cat_display.lower()} update worth sharing this week. Keep your customers engaged with timely updates and premium care. Reply YES and we’ll help you pick the right slot."
+        
+        elif trigger_kind in ["perf_dip", "seasonal_perf_dip"]:
+            payload = trigger.get("payload", {})
+            metric = payload.get("metric")
+            delta = payload.get("delta_pct") if payload.get("delta_pct") is not None else payload.get("delta")
+            window = payload.get("window")
+            
+            if metric and delta is not None and window:
+                try:
+                    if isinstance(delta, (int, float)):
+                        if -1.0 <= delta <= 1.0:
+                            delta_str = f"{int(delta * 100)}%"
+                        else:
+                            delta_str = f"{int(delta)}%"
+                    else:
+                        delta_str = str(delta)
+                except Exception:
+                    delta_str = str(delta)
+                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {active_offer}. Limited slots today; reply YES and we’ll help you pick the right time. Internal note: this targets the {metric} dip ({delta_str} in {window}); do not add extra discount.'"
+            else:
+                draft_body = f"Draft ready: Google/WhatsApp post for {biz}: 'This week at {locality}, we are keeping it simple with {active_offer}. Limited slots today; reply YES and we’ll help you pick the right time.'"
+                
         elif trigger_kind == "perf_spike":
             draft_body = f"Draft ready: Follow-up post for {biz}: 'We are busier than ever thanks to you! Block your slots for Saturday now to avoid waiting. Reply YES to book.'"
-        elif trigger_kind == "regulation_change":
-            draft_body = f"Draft ready: Compliance audit checklist for {biz}: '1. Audit equipment calibration. 2. Verify settings. 3. Document in SOPs. Reply YES to generate PDF.'"
         elif trigger_kind == "competitor_opened":
             draft_body = f"Draft ready: GBP post for {biz} highlighting quality: 'Why choose {biz} at {locality}? Certified care and verified outcomes. Reply YES to publish.'"
         elif trigger_kind == "festival_upcoming":
